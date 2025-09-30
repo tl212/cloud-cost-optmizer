@@ -251,4 +251,6 @@ dashboard/frontend/dist/
 
 # Local development
 .local/
-local/
+
+# dev report
+.dev_journal.md
