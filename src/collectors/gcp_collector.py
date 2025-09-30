@@ -3,6 +3,7 @@ from typing import Dict, List, Any
 from datetime import datetime
 from google.cloud import billing, asset, compute
 from google.oauth2 import service_account
+import google.auth
 import logging
 
 from .base_collector import BaseCollector
@@ -18,32 +19,32 @@ class GCPCollector(BaseCollector):
         super().__init__(config)
     
         self.project_id = self._get_config_value('project_id')
-        self.billing_account_id = self._get_config_value('billing_account_id')
-        self.service_account_path = self._get_config_value('service_account_path')
+        self.billing_account_id = self._get_config_value('billing_account_id', required=False)
+        self.service_account_path = self._get_config_value('service_account_path', required=False)
         
         self.billing_client = None
         self.asset_client = None
         self.compute_client = None
         self.credentials = None
         
-    def _get_config_value(self, key: str) -> str:
+    def _get_config_value(self, key: str, required: bool = True) -> str:
         """
-        args:
-            key: Configuration key
-        returns:
-            configuration value
         raises:
-            ValueError: if configuration key is missing
+            ValueError: if configuration key is missing and required=True
         """
         value = self.config.get(key)
         if not value:
-            raise ValueError(f"Missing required configuration: {key}")
+            if required:
+                raise ValueError(f"Missing required configuration: {key}")
+            return None
             
         if isinstance(value, str) and value.startswith('$'):
             env_name = value[1:]  # remove $ prefix
             env_value = os.getenv(env_name)
             if not env_value:
-                raise ValueError(f"Environment variable {env_name} not found (referenced by {key})")
+                if required:
+                    raise ValueError(f"Environment variable {env_name} not found (referenced by {key})")
+                return None
             return env_value
             
         return value
@@ -51,17 +52,27 @@ class GCPCollector(BaseCollector):
     def authenticate(self) -> bool:
 
         try:
-            if not os.path.exists(self.service_account_path):
-                self.logger.error(f"Service account file not found: {self.service_account_path}")
-                return False
-                
-            self.credentials = service_account.Credentials.from_service_account_file(
-                self.service_account_path,
-                scopes=[
-                    'https://www.googleapis.com/auth/cloud-billing.readonly',
-                    'https://www.googleapis.com/auth/cloud-platform.read-only'
-                ]
-            )
+            if self.service_account_path and self.service_account_path != 'null':
+                if not os.path.exists(self.service_account_path):
+                    self.logger.error(f"Service account file not found: {self.service_account_path}")
+                    return False
+                    
+                self.credentials = service_account.Credentials.from_service_account_file(
+                    self.service_account_path,
+                    scopes=[
+                        'https://www.googleapis.com/auth/cloud-billing.readonly',
+                        'https://www.googleapis.com/auth/cloud-platform'
+                    ]
+                )
+                self.logger.info("Using service account credentials")
+            else:
+                self.credentials, project = google.auth.default(
+                    scopes=[
+                        'https://www.googleapis.com/auth/cloud-billing.readonly',
+                        'https://www.googleapis.com/auth/cloud-platform.read-only'
+                    ]
+                )
+                self.logger.info(f"Using Application Default Credentials (detected project: {project})")
             
             self.billing_client = billing.CloudBillingClient(credentials=self.credentials)
             self.asset_client = asset.AssetServiceClient(credentials=self.credentials)
@@ -165,9 +176,7 @@ class GCPCollector(BaseCollector):
             list of required field names
         """
         return [
-            'project_id',
-            'billing_account_id', 
-            'service_account_path'
+            'project_id'
         ]
     
     def get_idle_compute_instances(self) -> List[Dict[str, Any]]:

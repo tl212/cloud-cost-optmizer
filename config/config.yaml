@@ -1,0 +1,10 @@
+project_id: "sevenl33-v2-25"
+billing_account_id: "$GCP_BILLING_ACCOUNT_ID"
+service_account_path: "service-account-key.json"
+
+logging:
+  level: INFO
+  
+analysis:
+  default_days: 30
+  include_idle_instances: true
